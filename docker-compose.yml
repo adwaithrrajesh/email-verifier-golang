@@ -1,0 +1,17 @@
+services:
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+  orchestrator:
+    build: ./orchestrator
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    ports: ["8080:8080"]
+    depends_on: [redis]
+
+  worker:
+    build: ./worker-go
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on: [redis]
