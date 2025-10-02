@@ -1,17 +1,87 @@
+version: '3.8'
+
 services:
   redis:
-    image: redis:7
+    image: redis:7-alpine
     ports: ["6379:6379"]
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - redis_data:/data
 
   orchestrator:
     build: ./orchestrator
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - WORKER_COUNT=${WORKER_COUNT:-3}
     ports: ["8080:8080"]
-    depends_on: [redis]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   worker:
     build: ./worker-go
     environment:
       - REDIS_URL=redis://redis:6379/0
-    depends_on: [redis]
+      - SMTP_TIMEOUT=${SMTP_TIMEOUT:-15s}
+      - SMTP_USE_STARTTLS=${SMTP_USE_STARTTLS:-true}
+      - SMTP_MAX_RETRIES=${SMTP_MAX_RETRIES:-3}
+      - RATE_LIMIT_PER_DOMAIN=${RATE_LIMIT_PER_DOMAIN:-10}
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: ${WORKER_COUNT:-3}
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+
+  # MailHog for testing SMTP functionality
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"  # SMTP port
+      - "8025:8025"  # Web UI port
+    profiles: ["testing"]
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    profiles: ["monitoring"]
+
+  # Grafana for dashboards (optional)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    profiles: ["monitoring"]
+
+volumes:
+  redis_data:
+  grafana_data:

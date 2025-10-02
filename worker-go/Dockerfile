@@ -1,19 +1,35 @@
-# ---------- build stage ----------
-FROM golang:1.22 AS build
+# Multi-stage build for Go worker
+FROM golang:1.22-alpine AS builder
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates git
+
 WORKDIR /app
 
-# Cache modules
+# Copy go mod files
 COPY go.mod go.sum ./
-RUN go env -w GOPROXY=https://proxy.golang.org,direct \
- && go mod download
+RUN go mod download
 
-# Copy the source
+# Copy source code
 COPY . .
 
-# Build (no VCS stamps; smaller binary)
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /bin/worker
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o worker .
 
-# ---------- runtime stage ----------
-FROM gcr.io/distroless/base-debian12
-COPY --from=build /bin/worker /worker
-ENTRYPOINT ["/worker"]
+# Final stage - minimal image
+FROM alpine:latest
+
+# Install ca-certificates for TLS connections
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/worker .
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD pgrep worker || exit 1
+
+# Run the worker
+CMD ["./worker"]

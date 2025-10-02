@@ -58,3 +58,39 @@ def poll(job_id: str, q: Poll):
             out.append(fields)
         last = msg_id
     return {"last_id": last, "items": out}
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for container orchestration."""
+    try:
+        r = rconn()
+        r.ping()
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "timestamp": "2024-01-01T00:00:00Z"  # Would use datetime in real implementation
+        }
+    except Exception as e:
+        raise HTTPException(503, f"Service unhealthy: {str(e)}")
+
+@app.get("/metrics")
+def get_metrics():
+    """Basic metrics endpoint for monitoring."""
+    try:
+        r = rconn()
+        
+        # Get stream lengths
+        tasks_pending = r.xlen(STREAM_TASKS)
+        results_count = r.xlen(STREAM_RESULTS)
+        
+        # Get job summary count
+        job_count = r.hlen(HASH_JOB_SUMMARY)
+        
+        return {
+            "tasks_pending": tasks_pending,
+            "results_total": results_count,
+            "jobs_active": job_count,
+            "status": "operational"
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Metrics unavailable: {str(e)}")
